@@ -174,10 +174,34 @@ class FpsAnalyzer(private val context: Context) {
         val reader = imageReader ?: return
 
         try {
+            val cameraId = findBackCamera() ?: return
+            val characteristics = cameraManager.getCameraCharacteristics(cameraId)
+
             val requestBuilder = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
                 addTarget(reader.surface)
                 previewSurface?.let { addTarget(it) }
-                set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO)
+
+                // Manual focus at infinity
+                set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
+                set(CaptureRequest.LENS_FOCUS_DISTANCE, 0.0f) // 0 = infinity
+
+                // Manual exposure for consistent frame timing
+                set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
+
+                // Get exposure range and set to a fast, fixed exposure
+                val exposureRange = characteristics.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
+                val targetExposureNs = 10_000_000L // 10ms (allows up to 100fps)
+                val exposureTime = exposureRange?.let {
+                    targetExposureNs.coerceIn(it.lower, it.upper)
+                } ?: targetExposureNs
+                set(CaptureRequest.SENSOR_EXPOSURE_TIME, exposureTime)
+
+                // Get ISO range and set to mid-range
+                val isoRange = characteristics.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
+                val iso = isoRange?.let {
+                    ((it.lower + it.upper) / 2).coerceIn(it.lower, it.upper)
+                } ?: 400
+                set(CaptureRequest.SENSOR_SENSITIVITY, iso)
             }
 
             session.setRepeatingRequest(requestBuilder.build(), null, handler)
