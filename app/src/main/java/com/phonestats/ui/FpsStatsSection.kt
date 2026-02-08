@@ -5,8 +5,10 @@ import android.view.SurfaceView
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -19,8 +21,24 @@ import kotlinx.coroutines.delay
 fun FpsStatsSection(fpsAnalyzer: FpsAnalyzer) {
     var stats by remember { mutableStateOf<FpsStats?>(null) }
     var isRunning by remember { mutableStateOf(false) }
+    
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("camera_settings", android.content.Context.MODE_PRIVATE) }
+    
+    var autoAF by remember { mutableStateOf(prefs.getBoolean("auto_af", false)) }
+    var autoAE by remember { mutableStateOf(prefs.getBoolean("auto_ae", false)) }
+    var exposureTimeMs by remember { mutableStateOf(prefs.getLong("exposure_time_ns", 10_000_000L) / 1_000_000f) }
+    var iso by remember { mutableStateOf(prefs.getInt("iso", 400)) }
+    
+    val exposureRange = remember { fpsAnalyzer.getCameraExposureRange() }
+    val isoRange = remember { fpsAnalyzer.getCameraIsoRange() }
 
     LaunchedEffect(fpsAnalyzer) {
+        fpsAnalyzer.autoAF = autoAF
+        fpsAnalyzer.autoAE = autoAE
+        fpsAnalyzer.exposureTimeNs = (exposureTimeMs * 1_000_000f).toLong()
+        fpsAnalyzer.iso = iso
+        
         while (true) {
             stats = fpsAnalyzer.getStats()
             isRunning = fpsAnalyzer.isRunning()
@@ -71,6 +89,145 @@ fun FpsStatsSection(fpsAnalyzer: FpsAnalyzer) {
                         }
                     }
                 )
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            // Camera Controls
+            Text(
+                text = "Camera Controls",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            // AF Controls
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Auto Focus",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f)
+                )
+                Switch(
+                    checked = autoAF,
+                    onCheckedChange = { enabled ->
+                        autoAF = enabled
+                        fpsAnalyzer.autoAF = enabled
+                        fpsAnalyzer.updateCameraSettings()
+                        prefs.edit().putBoolean("auto_af", enabled).apply()
+                    }
+                )
+            }
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            // AE Controls
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Auto Exposure",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f)
+                )
+                Switch(
+                    checked = autoAE,
+                    onCheckedChange = { enabled ->
+                        autoAE = enabled
+                        fpsAnalyzer.autoAE = enabled
+                        fpsAnalyzer.updateCameraSettings()
+                        prefs.edit().putBoolean("auto_ae", enabled).apply()
+                    }
+                )
+            }
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            // Exposure Time Slider
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "Exposure Time",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (autoAE) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = String.format("%.1f ms", exposureTimeMs),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (autoAE) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface
+                    )
+                }
+                
+                exposureRange?.let { range ->
+                    val minMs = range.first / 1_000_000f
+                    val maxMs = range.last / 1_000_000f
+                    
+                    Slider(
+                        value = exposureTimeMs,
+                        onValueChange = { value ->
+                            exposureTimeMs = value
+                        },
+                        onValueChangeFinished = {
+                            fpsAnalyzer.exposureTimeNs = (exposureTimeMs * 1_000_000f).toLong()
+                            fpsAnalyzer.updateCameraSettings()
+                            prefs.edit().putLong("exposure_time_ns", (exposureTimeMs * 1_000_000f).toLong()).apply()
+                        },
+                        valueRange = minMs..maxMs,
+                        enabled = !autoAE
+                    )
+                }
+            }
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            // ISO Slider
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "ISO",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (autoAE) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = iso.toString(),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (autoAE) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface
+                    )
+                }
+                
+                isoRange?.let { range ->
+                    Slider(
+                        value = iso.toFloat(),
+                        onValueChange = { value ->
+                            iso = value.toInt()
+                        },
+                        onValueChangeFinished = {
+                            fpsAnalyzer.iso = iso
+                            fpsAnalyzer.updateCameraSettings()
+                            prefs.edit().putInt("iso", iso).apply()
+                        },
+                        valueRange = range.first.toFloat()..range.last.toFloat(),
+                        enabled = !autoAE
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(8.dp))

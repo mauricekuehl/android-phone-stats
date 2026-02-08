@@ -43,11 +43,45 @@ class FpsAnalyzer(private val context: Context) {
     private var previewSurface: Surface? = null
     private var previewSize: Size = Size(640, 480)
 
+    var autoAE: Boolean = false
+    var autoAF: Boolean = false
+    var exposureTimeNs: Long = 10_000_000L
+    var iso: Int = 400
+
     private val oneMinWindowNs = 60_000_000_000L
     private val fiveMinWindowNs = 300_000_000_000L
     private val twentyMinWindowNs = 1_200_000_000_000L
 
     fun getPreviewSize(): Size = previewSize
+
+    fun getCameraExposureRange(): LongRange? {
+        return try {
+            val cameraId = findBackCamera() ?: return null
+            val characteristics = cameraManager.getCameraCharacteristics(cameraId)
+            val range = characteristics.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
+            range?.let { LongRange(it.lower, it.upper) }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    fun getCameraIsoRange(): IntRange? {
+        return try {
+            val cameraId = findBackCamera() ?: return null
+            val characteristics = cameraManager.getCameraCharacteristics(cameraId)
+            val range = characteristics.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
+            range?.let { IntRange(it.lower, it.upper) }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    fun updateCameraSettings() {
+        if (isRunning) {
+            stop()
+            start()
+        }
+    }
 
     fun setPreviewSurface(surface: Surface?) {
         val wasRunning = isRunning
@@ -181,27 +215,32 @@ class FpsAnalyzer(private val context: Context) {
                 addTarget(reader.surface)
                 previewSurface?.let { addTarget(it) }
 
-                // Manual focus at infinity
-                set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
-                set(CaptureRequest.LENS_FOCUS_DISTANCE, 0.0f) // 0 = infinity
+                // Configure AF mode
+                if (autoAF) {
+                    set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+                } else {
+                    set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
+                    set(CaptureRequest.LENS_FOCUS_DISTANCE, 0.0f) // 0 = infinity
+                }
 
-                // Manual exposure for consistent frame timing
-                set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
+                // Configure AE mode
+                if (autoAE) {
+                    set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+                } else {
+                    set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
+                    
+                    val exposureRange = characteristics.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
+                    val exposureTime = exposureRange?.let {
+                        exposureTimeNs.coerceIn(it.lower, it.upper)
+                    } ?: exposureTimeNs
+                    set(CaptureRequest.SENSOR_EXPOSURE_TIME, exposureTime)
 
-                // Get exposure range and set to a fast, fixed exposure
-                val exposureRange = characteristics.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)
-                val targetExposureNs = 10_000_000L // 10ms (allows up to 100fps)
-                val exposureTime = exposureRange?.let {
-                    targetExposureNs.coerceIn(it.lower, it.upper)
-                } ?: targetExposureNs
-                set(CaptureRequest.SENSOR_EXPOSURE_TIME, exposureTime)
-
-                // Get ISO range and set to mid-range
-                val isoRange = characteristics.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
-                val iso = isoRange?.let {
-                    ((it.lower + it.upper) / 2).coerceIn(it.lower, it.upper)
-                } ?: 400
-                set(CaptureRequest.SENSOR_SENSITIVITY, iso)
+                    val isoRange = characteristics.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)
+                    val isoValue = isoRange?.let {
+                        iso.coerceIn(it.lower, it.upper)
+                    } ?: iso
+                    set(CaptureRequest.SENSOR_SENSITIVITY, isoValue)
+                }
             }
 
             session.setRepeatingRequest(requestBuilder.build(), null, handler)
