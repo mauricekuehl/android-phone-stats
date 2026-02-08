@@ -16,6 +16,7 @@ import java.util.concurrent.Executor
 
 data class FpsStats(
     val frameCount: Long,
+    val tenSecStats: FpsAnalyzer.WindowStats?,
     val oneMinStats: FpsAnalyzer.WindowStats?,
     val fiveMinStats: FpsAnalyzer.WindowStats?,
     val twentyMinStats: FpsAnalyzer.WindowStats?
@@ -48,6 +49,7 @@ class FpsAnalyzer(private val context: Context) {
     var exposureTimeNs: Long = 10_000_000L
     var iso: Int = 400
 
+    private val tenSecWindowNs = 10_000_000_000L
     private val oneMinWindowNs = 60_000_000_000L
     private val fiveMinWindowNs = 300_000_000_000L
     private val twentyMinWindowNs = 1_200_000_000_000L
@@ -267,6 +269,7 @@ class FpsAnalyzer(private val context: Context) {
 
         return FpsStats(
             frameCount = frameCount,
+            tenSecStats = calculateWindowStats(now - tenSecWindowNs),
             oneMinStats = calculateWindowStats(now - oneMinWindowNs),
             fiveMinStats = calculateWindowStats(now - fiveMinWindowNs),
             twentyMinStats = calculateWindowStats(now - twentyMinWindowNs)

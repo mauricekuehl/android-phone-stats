@@ -21,6 +21,7 @@ import kotlinx.coroutines.delay
 fun FpsStatsSection(fpsAnalyzer: FpsAnalyzer) {
     var stats by remember { mutableStateOf<FpsStats?>(null) }
     var isRunning by remember { mutableStateOf(false) }
+    var previewSize by remember { mutableStateOf(fpsAnalyzer.getPreviewSize()) }
     
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("camera_settings", android.content.Context.MODE_PRIVATE) }
@@ -42,6 +43,7 @@ fun FpsStatsSection(fpsAnalyzer: FpsAnalyzer) {
         while (true) {
             stats = fpsAnalyzer.getStats()
             isRunning = fpsAnalyzer.isRunning()
+            previewSize = fpsAnalyzer.getPreviewSize()
             delay(1000)
         }
     }
@@ -63,7 +65,13 @@ fun FpsStatsSection(fpsAnalyzer: FpsAnalyzer) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(120.dp)
+                    .aspectRatio(
+                        if (previewSize.height > 0) {
+                            previewSize.width.toFloat() / previewSize.height.toFloat()
+                        } else {
+                            4f / 3f
+                        }
+                    )
                     .clip(RoundedCornerShape(8.dp))
             ) {
                 AndroidView(
@@ -171,7 +179,10 @@ fun FpsStatsSection(fpsAnalyzer: FpsAnalyzer) {
                 
                 exposureRange?.let { range ->
                     val minMs = range.first / 1_000_000f
-                    val maxMs = range.last / 1_000_000f
+                    val maxMs = maxOf(minMs, minOf(range.last / 1_000_000f, 20f))
+                    if (exposureTimeMs !in minMs..maxMs) {
+                        exposureTimeMs = exposureTimeMs.coerceIn(minMs, maxMs)
+                    }
                     
                     Slider(
                         value = exposureTimeMs,
@@ -252,6 +263,7 @@ fun FpsStatsSection(fpsAnalyzer: FpsAnalyzer) {
                 )
                 Spacer(modifier = Modifier.height(8.dp))
 
+                FpsWindowStats("Last 10 sec", s.tenSecStats)
                 FpsWindowStats("Last 1 min", s.oneMinStats)
                 FpsWindowStats("Last 5 min", s.fiveMinStats)
                 FpsWindowStats("Last 20 min", s.twentyMinStats)
